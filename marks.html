@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hackathon Marks Page</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+</head>
+
+<body class="bg-gray-100 p-6">
+    <div class="max-w-5xl mx-auto bg-white p-6 rounded-lg shadow-lg">
+        <h1 class="text-2xl font-bold mb-4">Hackathon Marks Sheet</h1>
+
+        <!-- Input and Scanner -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-gray-700 font-medium">Team Name:</label>
+                <input type="text" id="teamName" placeholder="Enter Team Name" class="mt-1 p-2 border rounded w-full" />
+            </div>
+            <div>
+                <h2 class="text-lg font-bold">Scan QR Code</h2>
+                <div id="qr-reader" class="mt-2"></div>
+                <button id="startScanBtn" class="mt-2 bg-blue-600 text-white py-1 px-3 rounded hover:bg-blue-700">Start
+                    Scanner</button>
+            </div>
+        </div>
+
+        <!-- Scan Result -->
+        <div id="scanResult" class="mt-4 text-lg"></div>
+
+        <!-- Marks Input -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div>
+                <label class="block text-gray-700 font-medium">Innovation:</label>
+                <input type="number" id="innovation" class="mt-1 p-2 border rounded w-full" />
+            </div>
+            <div>
+                <label class="block text-gray-700 font-medium">Execution:</label>
+                <input type="number" id="execution" class="mt-1 p-2 border rounded w-full" />
+            </div>
+            <div>
+                <label class="block text-gray-700 font-medium">Presentation:</label>
+                <input type="number" id="presentation" class="mt-1 p-2 border rounded w-full" />
+            </div>
+            <div>
+                <label class="block text-gray-700 font-medium">Impact:</label>
+                <input type="number" id="impact" class="mt-1 p-2 border rounded w-full" />
+            </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button id="addMarksBtn" class="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 mt-4">Add
+            Marks</button>
+
+        <!-- Table -->
+        <table class="mt-6 w-full bg-white border rounded-lg">
+            <thead class="bg-gray-200">
+                <tr>
+                    <th class="py-2 px-4 border">Team Name</th>
+                    <th class="py-2 px-4 border">Innovation</th>
+                    <th class="py-2 px-4 border">Execution</th>
+                    <th class="py-2 px-4 border">Presentation</th>
+                    <th class="py-2 px-4 border">Impact</th>
+                    <th class="py-2 px-4 border">Total Score</th>
+                </tr>
+            </thead>
+            <tbody id="marksTableBody">
+                <!-- Rows will appear here -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const supabase = window.supabase.createClient(
+            'https://ecxqigkgxsrmkmvhukxq.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjeHFpZ2tneHNybWttdmh1a3hxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDIwNjgzNTMsImV4cCI6MjA1NzY0NDM1M30.a1OPvN5OfwYdph0OOkmCPcolLO4Y1TL7xPDpn0wFzpI'
+        );
+
+        const teamData = {}; // Local store for scanned teams
+
+        document.addEventListener("DOMContentLoaded", () => {
+            document.getElementById("startScanBtn").addEventListener("click", startScanner);
+            document.getElementById("addMarksBtn").addEventListener("click", addMarks);
+        });
+
+        function startScanner() {
+            const scanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: 250 });
+            scanner.render(onScanSuccess);
+        }
+
+        function onScanSuccess(decodedText) {
+            document.getElementById("teamName").value = decodedText;
+            if (teamData[decodedText]) {
+                const data = teamData[decodedText];
+                document.getElementById("scanResult").innerHTML = `
+          <h2 class="text-xl font-bold">Team: ${decodedText}</h2>
+          <p>Innovation: ${data.innovation}</p>
+          <p>Execution: ${data.execution}</p>
+          <p>Presentation: ${data.presentation}</p>
+          <p>Impact: ${data.impact}</p>
+          <p class="font-bold">Total Score: ${data.totalScore}</p>
+        `;
+            } else {
+                document.getElementById("scanResult").innerText = "Team scanned! No marks added yet.";
+            }
+        }
+
+        async function addMarks() {
+            let teamName = document.getElementById("teamName").value.trim();
+            if (teamName.toLowerCase().includes("team name:")) {
+                teamName = teamName.split(":")[1].trim();
+            }
+            const innovation = parseInt(document.getElementById("innovation").value) || 0;
+            const execution = parseInt(document.getElementById("execution").value) || 0;
+            const presentation = parseInt(document.getElementById("presentation").value) || 0;
+            const impact = parseInt(document.getElementById("impact").value) || 0;
+            const totalScore = innovation + execution + presentation + impact;
+
+            if (!teamName) return alert("Team name is required.");
+
+            console.log("Searching for team:", teamName); // Debug log
+
+            const { data: team, error: teamError } = await supabase
+                .from("teams")
+                .select("id")
+                .ilike("team_name", teamName) // case-insensitive search
+                .single();
+
+            if (teamError || !team) {
+                alert("Team not found in database.");
+                console.error(teamError);
+                return;
+            }
+
+            const { error: insertError } = await supabase
+                .from("team_marks")
+                .insert([{
+                    team_id: team.id,
+                    team_name: teamName, // ← Add this line
+                    innovation,
+                    execution,
+                    presentation,
+                    impact,
+                    total_score: totalScore,
+                }]);
+
+            if (insertError) {
+                alert("Failed to insert marks.");
+                console.error(insertError);
+                return;
+
+
+                // Add to table, update local store, etc...
+                // (same as your original code)
+            }
+
+            // Update table
+            const tableBody = document.getElementById("marksTableBody");
+            const row = document.createElement("tr");
+            row.innerHTML = `
+        <td class="py-2 px-4 border">${teamName}</td>
+        <td class="py-2 px-4 border">${innovation}</td>
+        <td class="py-2 px-4 border">${execution}</td>
+        <td class="py-2 px-4 border">${presentation}</td>
+        <td class="py-2 px-4 border">${impact}</td>
+        <td class="py-2 px-4 border font-bold">${totalScore}</td>
+      `;
+            tableBody.appendChild(row);
+
+            // Store for later scans
+            teamData[teamName] = { innovation, execution, presentation, impact, totalScore };
+
+            // Clear inputs
+            ["teamName", "innovation", "execution", "presentation", "impact"].forEach(id => {
+                document.getElementById(id).value = "";
+            });
+
+            document.getElementById("scanResult").innerText = "Marks added!";
+        }
+    </script>
+</body>
+
+</html>
