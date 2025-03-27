@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hackathon Attendance</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-6">
+  <div class="w-full max-w-5xl bg-white p-8 rounded-xl shadow-lg space-y-6">
+    <h1 class="text-3xl font-bold text-gray-800 mb-4 text-center">📋 Hackathon Attendance</h1>
+
+    <!-- Scanner & Manual Entry -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Scanner -->
+      <div>
+        <h2 class="text-xl font-semibold text-gray-700 mb-2">Scan QR Code</h2>
+        <div id="qr-reader" class="border rounded-lg shadow p-2"></div>
+        <button onclick="startScanner()"
+          class="mt-3 w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition">Start
+          Scanner</button>
+      </div>
+
+      <!-- Manual Entry -->
+      <div>
+        <h2 class="text-xl font-semibold text-gray-700 mb-2">Manual Entry</h2>
+        <label class="block text-gray-600 font-medium mb-1">Team Name:</label>
+        <input type="text" id="manualTeamName" placeholder="Enter Team Name"
+          class="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <button onclick="handleManualAdd()"
+          class="mt-3 w-full bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg transition">
+          Add to Attendance
+        </button>
+      </div>
+    </div>
+
+    <!-- Attendance Table -->
+    <div>
+      <h2 class="text-xl font-semibold text-gray-700 mb-2">Attendance List</h2>
+      <div class="overflow-x-auto">
+        <table class="min-w-full bg-white border rounded-lg">
+          <thead class="bg-gray-200 text-gray-700">
+            <tr>
+              <th class="py-2 px-4 border">Student Name</th>
+              <th class="py-2 px-4 border">Team Name</th>
+              <th class="py-2 px-4 border">Role</th>
+              <th class="py-2 px-4 border">Present</th>
+            </tr>
+          </thead>
+          <tbody id="attendanceTableBody">
+            <!-- Filled dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <button onclick="submitAttendanceToSupabase()"
+      class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-semibold transition">✅
+      Submit Attendance</button>
+  </div>
+
+  <script>
+    // 🔐 Supabase init
+    const supabase = window.supabase.createClient(
+      'https://ecxqigkgxsrmkmvhukxq.supabase.co',
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjeHFpZ2tneHNybWttdmh1a3hxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDIwNjgzNTMsImV4cCI6MjA1NzY0NDM1M30.a1OPvN5OfwYdph0OOkmCPcolLO4Y1TL7xPDpn0wFzpI'
+    );
+
+    // Track current team data
+    let currentTeamId = null;
+    const currentEvent = "Hackathon 2024"; // Set your event name
+
+    // Add each student to table
+    function addStudentRow(studentName, teamName, role = "Member", personId) {
+      const tableBody = document.getElementById("attendanceTableBody");
+      const row = document.createElement("tr");
+      row.dataset.personId = personId;
+      row.dataset.role = role.toLowerCase();
+      row.innerHTML = `
+        <td class="py-2 px-4 border text-gray-800">${studentName}</td>
+        <td class="py-2 px-4 border text-gray-800">${teamName}</td>
+        <td class="py-2 px-4 border text-gray-800">${role}</td>
+        <td class="py-2 px-4 border text-center">
+          <input type="checkbox" class="h-5 w-5 accent-green-600" checked 
+                 data-person-id="${personId}" data-role="${role.toLowerCase()}">
+        </td>
+      `;
+      tableBody.appendChild(row);
+    }
+
+    // Handle Add to Attendance
+    async function handleManualAdd() {
+      const teamName = document.getElementById("manualTeamName").value.trim();
+      if (!teamName) return alert("Please enter a team name.");
+
+      // Clear previous data
+      document.getElementById("attendanceTableBody").innerHTML = "";
+      currentTeamId = null;
+
+      // Get team ID
+      const { data: team, error: teamError } = await supabase
+        .from("teams")
+        .select("id")
+        .eq("team_name", teamName)
+        .single();
+
+      if (teamError || !team) {
+        return alert("Team not found!");
+      }
+
+      currentTeamId = team.id;
+
+      // Get team leader
+      const { data: leader, error: leaderError } = await supabase
+        .from("team_leaders")
+        .select("id, full_name")
+        .eq("team_id", currentTeamId)
+        .single();
+
+      if (!leaderError && leader) {
+        addStudentRow(leader.full_name, teamName, "Leader", leader.id);
+      }
+
+      // Get team members
+      const { data: members, error: memberError } = await supabase
+        .from("team_members")
+        .select("id, full_name")
+        .eq("team_id", currentTeamId);
+
+      if (memberError || !members || members.length === 0) {
+        return alert("No members found for this team.");
+      }
+
+      members.forEach(member => {
+        addStudentRow(member.full_name, teamName, "Member", member.id);
+      });
+    }
+
+    // Handle QR scan success
+    function onScanSuccess(decodedText) {
+      console.log("Scanned QR Code:", decodedText);
+      let teamName = decodedText.trim();
+
+      // Remove any prefix like "Team Name:"
+      if (teamName.toLowerCase().startsWith("team name:")) {
+        teamName = teamName.split(":")[1].trim();
+      }
+
+      document.getElementById("manualTeamName").value = teamName;
+    }
+
+    // Start QR scanner
+    function startScanner() {
+      const scanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: 250 });
+      scanner.render(onScanSuccess);
+    }
+
+    // Submit attendance to Supabase
+    async function submitAttendanceToSupabase() {
+      const rows = document.querySelectorAll("#attendanceTableBody tr");
+      const attendanceRecords = [];
+
+      rows.forEach(row => {
+        const full_name = row.children[0].textContent.trim();
+        const team_name = row.children[1].textContent.trim();
+        const role = row.children[2].textContent.trim();
+        const present = row.querySelector("input[type='checkbox']").checked;
+
+        attendanceRecords.push({
+          full_name,
+          team_name,
+          role,
+          present,
+          timestamp: new Date().toISOString()
+        });
+      });
+
+      if (attendanceRecords.length === 0) {
+        return alert("No attendance records to submit.");
+      }
+
+      const { error } = await supabase.from("attendance").insert(attendanceRecords);
+
+      if (error) {
+        console.error("Error submitting attendance:", error);
+        alert("❌ Error submitting attendance. Check console for details.");
+      } else {
+        alert(`✅ Successfully submitted ${attendanceRecords.length} attendance records!`);
+        document.getElementById("attendanceTableBody").innerHTML = "";
+        document.getElementById("manualTeamName").value = "";
+        currentTeamId = null;
+      }
+    }
+  </script>
+</body>
+
+</html>
